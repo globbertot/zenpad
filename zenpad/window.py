@@ -1517,6 +1517,33 @@ class ZenpadWindow(Gtk.ApplicationWindow):
         if editor.search_context:
              editor.search_context.connect("notify::occurrences-count", lambda w, p: self.update_match_count(editor))
 
+        # Apply Global Settings to New Tab
+        editor.view.set_show_line_numbers(self.show_line_numbers)
+        editor.view.set_highlight_current_line(self.settings.get("highlight_current_line"))
+        editor.view.set_wrap_mode(Gtk.WrapMode.WORD if self.doc_word_wrap else Gtk.WrapMode.NONE)
+        editor.view.set_auto_indent(self.doc_auto_indent)
+        editor.view.set_tab_width(self.doc_tab_size)
+        editor.view.set_insert_spaces_instead_of_tabs(self.doc_use_spaces)
+        
+        # Apply Font
+        font_name = self.settings.get("font")
+        if font_name:
+             font_desc = Pango.FontDescription(font_name)
+             editor.view.modify_font(font_desc)
+             editor.font_desc = font_desc
+        
+        # Apply Theme
+        editor.set_scheme(self.settings.get("theme"))
+
+        # Apply Padding
+        pad_map = {"small": 2, "normal": 6, "large": 12}
+        margin = pad_map.get(self.settings.get("editor_padding"), 6)
+        editor.view.set_left_margin(margin)
+        editor.view.set_right_margin(margin)
+
+        # Reset modified flag (ensure opening file/new tab is clean)
+        editor.buffer.set_modified(False)
+
         # Switch to the new tab
         self.notebook.set_current_page(-1)
         self.update_tab_label(editor)

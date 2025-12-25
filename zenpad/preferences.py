@@ -10,7 +10,7 @@ DEFAULT_SETTINGS = {
     "font": "Monospace 12",
     "word_wrap": True,
     "show_line_numbers": True,
-    "highlight_current_line": True,
+    "highlight_current_line": False,
     
     # Indentation
     "tab_width": 4,
