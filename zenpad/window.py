@@ -1660,7 +1660,18 @@ class ZenpadWindow(Gtk.ApplicationWindow):
 
     def open_file_from_path(self, file_path):
         if not os.path.exists(file_path):
-             print(f"File not found: {file_path}")
+             # Create new tab with this filename/path, ready to save
+             self.add_tab("", os.path.basename(file_path), os.path.abspath(file_path))
+             # Mark as modified/unsaved initially? Or just ready?
+             # Usually "new file" implies not saved to disk yet, BUT path is set.
+             # If we set path, save() will overwrite.
+             # The user expects "zenpad foo.txt" -> edits -> save -> writes to foo.txt.
+             # So this is correct.
+             # However, since file doesn't exist, we might want to mark it modified so they don't think it's saved.
+             # But add_tab (with my recent fix) sets modified=False.
+             # Let's set modified=True explicitly if we created it from scratch?
+             # No, if I open "foo.txt" and it's empty, and I don't type anything, and close, it shouldn't prompt.
+             # If I type, it becomes modified. That's fine.
              return
 
         try:
