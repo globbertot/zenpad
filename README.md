@@ -78,6 +78,10 @@ zenpad file1.py file2.js # Open multiple files
 
 ## Development
 
+**We actively invite the developer and cybersecurity communities to collaborate on Zenpad.** 
+
+We believe that the best software is built through transparency and rigorous testing. Whether you are interested in auditing the codebase for security vulnerabilities, optimizing GTK rendering performance, or implementing new features, your expertise is welcome here. Please feel free to fork the repository, submit pull requests, or open issues for any findings.
+
 To build the Debian package from source, ensure you have the necessary build tools installed:
 
 ```bash
