@@ -24,16 +24,38 @@ class EditorTab(Gtk.ScrolledWindow):
         self.view.set_auto_indent(True)
         self.view.set_highlight_current_line(True)
         self.view.set_wrap_mode(Gtk.WrapMode.WORD)
+        self.view.set_left_margin(6)
+        self.view.set_right_margin(6)
         
         # Load Default Theme
         self.set_scheme("tango")
 
         # Font (Default Monospace)
-        font_desc = Pango.FontDescription("Monospace 12")
-        self.view.modify_font(font_desc)
+        self.font_desc = Pango.FontDescription("Monospace 12")
+        self.view.modify_font(self.font_desc)
         
         self.add(self.view)
         self.show_all()
+
+    def zoom_in(self):
+        size = self.font_desc.get_size()
+        # Pango size is in pango units (scaled by PANGO_SCALE usually, but string init might be different)
+        # If initialized from string "12", get_size() returns 12 * PANGO_SCALE.
+        
+        # However, checking behavior:
+        # If I set Absolute size, it might be different.
+        # Let's assume standard Pango unit handling.
+        
+        new_size = size + (2 * Pango.SCALE)
+        self.font_desc.set_size(new_size)
+        self.view.modify_font(self.font_desc)
+
+    def zoom_out(self):
+        size = self.font_desc.get_size()
+        new_size = size - (2 * Pango.SCALE)
+        if new_size >= (6 * Pango.SCALE): # Minimum size 6
+            self.font_desc.set_size(new_size)
+            self.view.modify_font(self.font_desc)
 
     def get_text(self):
         start_iter = self.buffer.get_start_iter()

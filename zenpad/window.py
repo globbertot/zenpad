@@ -1,4 +1,4 @@
-from gi.repository import Gtk, Pango, Gdk, Gio
+from gi.repository import Gtk, Pango, Gdk, Gio, GLib
 import os
 import json
 from .editor import EditorTab
@@ -27,13 +27,34 @@ class ZenpadWindow(Gtk.ApplicationWindow):
         main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.add(main_box)
 
+        # Search State
+        self.incremental_search = True
+        self.highlight_all = True
+        
+        # View State
+        self.show_line_numbers = True
+        self.show_menubar = True
+        self.show_toolbar = True
+        self.show_statusbar = True
+        self.is_fullscreen = False
+        
+        # Document State
+        self.doc_word_wrap = True
+        self.doc_auto_indent = True
+        self.doc_tab_size = 4
+        self.doc_write_bom = False
+        self.doc_viewer_mode = False
+        self.doc_line_ending = "Current" # Placeholder
+        
         # 1. Menu Bar
-        menubar = self.create_menubar()
-        main_box.pack_start(menubar, False, False, 0)
+
+        # 1. Menu Bar
+        self.menubar = self.create_menubar()
+        main_box.pack_start(self.menubar, False, False, 0)
         
         # 2. Toolbar
-        toolbar = self.create_toolbar()
-        main_box.pack_start(toolbar, False, False, 0)
+        self.toolbar = self.create_toolbar()
+        main_box.pack_start(self.toolbar, False, False, 0)
 
         # 3. Notebook (content)
         self.notebook = Gtk.Notebook()
@@ -41,7 +62,6 @@ class ZenpadWindow(Gtk.ApplicationWindow):
         self.notebook.connect("switch-page", self.on_tab_switched)
         main_box.pack_start(self.notebook, True, True, 0)
         
-        # 3.5 Search Bar (Footer)
         self.search_settings = GtkSource.SearchSettings()
         self.search_bar_revealer = Gtk.Revealer()
         self.search_bar_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_UP)
@@ -295,15 +315,229 @@ class ZenpadWindow(Gtk.ApplicationWindow):
         search_item = Gtk.MenuItem(label="Search")
         search_item.set_submenu(search_menu)
         
-        find_item = Gtk.MenuItem(label="Find...")
+        # Find
+        find_item = Gtk.ImageMenuItem(label="Find")
+        find_item.set_image(Gtk.Image.new_from_icon_name("edit-find", Gtk.IconSize.MENU))
+        find_item.set_always_show_image(True)
         find_item.connect("activate", lambda w: self.on_find_clicked("find"))
+        find_item.add_accelerator("activate", self.accel_group, Gdk.KEY_f, Gdk.ModifierType.CONTROL_MASK, Gtk.AccelFlags.VISIBLE)
         search_menu.append(find_item)
 
-        replace_item = Gtk.MenuItem(label="Find & Replace...")
+        # Find Next
+        find_next_item = Gtk.MenuItem(label="Find Next")
+        find_next_item.connect("activate", self.on_search_next)
+        find_next_item.add_accelerator("activate", self.accel_group, Gdk.KEY_g, Gdk.ModifierType.CONTROL_MASK, Gtk.AccelFlags.VISIBLE)
+        search_menu.append(find_next_item)
+
+        # Find Previous
+        find_prev_item = Gtk.MenuItem(label="Find Previous")
+        find_prev_item.connect("activate", self.on_search_prev)
+        find_prev_item.add_accelerator("activate", self.accel_group, Gdk.KEY_g, Gdk.ModifierType.SHIFT_MASK | Gdk.ModifierType.CONTROL_MASK, Gtk.AccelFlags.VISIBLE)
+        search_menu.append(find_prev_item)
+
+        # Find and Replace
+        replace_item = Gtk.ImageMenuItem(label="Find and Replace...")
+        replace_item.set_image(Gtk.Image.new_from_icon_name("edit-find-replace", Gtk.IconSize.MENU))
+        replace_item.set_always_show_image(True)
         replace_item.connect("activate", lambda w: self.on_find_clicked("replace"))
+        replace_item.add_accelerator("activate", self.accel_group, Gdk.KEY_r, Gdk.ModifierType.CONTROL_MASK, Gtk.AccelFlags.VISIBLE)
         search_menu.append(replace_item)
         
+        search_menu.append(Gtk.SeparatorMenuItem())
+        
+        # Incremental Search
+        self.inc_search_item = Gtk.CheckMenuItem(label="Incremental Search")
+        self.inc_search_item.set_active(self.incremental_search)
+        self.inc_search_item.connect("toggled", self.on_toggle_incremental)
+        search_menu.append(self.inc_search_item)
+        
+        # Highlight All
+        self.highlight_item = Gtk.CheckMenuItem(label="Highlight All")
+        self.highlight_item.set_active(self.highlight_all)
+        self.highlight_item.connect("toggled", self.on_toggle_highlight)
+        search_menu.append(self.highlight_item)
+        
+        search_menu.append(Gtk.SeparatorMenuItem())
+        
+        # Go to
+        goto_item = Gtk.MenuItem(label="Go to...")
+        goto_item.connect("activate", self.on_goto_line)
+        goto_item.add_accelerator("activate", self.accel_group, Gdk.KEY_l, Gdk.ModifierType.CONTROL_MASK, Gtk.AccelFlags.VISIBLE)
+        search_menu.append(goto_item)
+        
         menubar.append(search_item)
+        
+        # View Menu
+        view_menu = Gtk.Menu()
+        view_item = Gtk.MenuItem(label="View")
+        view_item.set_submenu(view_menu)
+        
+        # Select Font
+        font_item = Gtk.ImageMenuItem(label="Select Font...")
+        font_item.set_image(Gtk.Image.new_from_icon_name("preferences-desktop-font", Gtk.IconSize.MENU))
+        font_item.set_always_show_image(True)
+        font_item.connect("activate", self.on_select_font)
+        view_menu.append(font_item)
+        
+        # Color Scheme Submenu
+        scheme_item = Gtk.MenuItem(label="Color Scheme")
+        scheme_menu = Gtk.Menu()
+        scheme_item.set_submenu(scheme_menu)
+        
+        # Populate schemes
+        manager = GtkSource.StyleSchemeManager.get_default()
+        schemes = manager.get_scheme_ids()
+        # Sort for niceness, maybe prioritize Tango/Classic?
+        # Just listing them
+        group = None
+        for scheme_id in sorted(schemes):
+            if group is None:
+                item = Gtk.RadioMenuItem(label=scheme_id)
+                group = item
+            else:
+                item = Gtk.RadioMenuItem(label=scheme_id, group=group)
+            
+            if scheme_id == "tango":
+                 item.set_active(True)
+            
+            item.connect("activate", self.on_change_scheme, scheme_id)
+            scheme_menu.append(item)
+            
+        view_menu.append(scheme_item)
+        
+        view_menu.append(Gtk.SeparatorMenuItem())
+        
+        # Line Numbers
+        line_num_item = Gtk.CheckMenuItem(label="Line Numbers")
+        line_num_item.set_active(self.show_line_numbers)
+        line_num_item.connect("toggled", self.on_toggle_line_numbers)
+        view_menu.append(line_num_item)
+        
+        # Menubar
+        self.menubar_chk = Gtk.CheckMenuItem(label="Menubar")
+        self.menubar_chk.set_action_name("win.toggle_menubar")
+        view_menu.append(self.menubar_chk)
+        
+        # Toolbar
+        self.toolbar_chk = Gtk.CheckMenuItem(label="Toolbar")
+        self.toolbar_chk.set_action_name("win.toggle_toolbar")
+        view_menu.append(self.toolbar_chk)
+        
+        # Statusbar
+        self.statusbar_chk = Gtk.CheckMenuItem(label="Statusbar")
+        self.statusbar_chk.set_action_name("win.toggle_statusbar")
+        view_menu.append(self.statusbar_chk)
+        
+        view_menu.append(Gtk.SeparatorMenuItem())
+        
+        # Fullscreen
+        fs_item = Gtk.CheckMenuItem(label="Fullscreen")
+        fs_item.set_action_name("win.toggle_fullscreen")
+        view_menu.append(fs_item)
+        
+        view_menu.append(Gtk.SeparatorMenuItem())
+
+        zoom_in_item = Gtk.ImageMenuItem(label="Zoom In")
+        zoom_in_item.set_image(Gtk.Image.new_from_icon_name("zoom-in", Gtk.IconSize.MENU))
+        zoom_in_item.set_always_show_image(True)
+        zoom_in_item.connect("activate", self.on_zoom_in)
+        zoom_in_item.add_accelerator("activate", self.accel_group, Gdk.KEY_plus, Gdk.ModifierType.CONTROL_MASK, Gtk.AccelFlags.VISIBLE)
+        view_menu.append(zoom_in_item)
+
+        zoom_out_item = Gtk.ImageMenuItem(label="Zoom Out")
+        zoom_out_item.set_image(Gtk.Image.new_from_icon_name("zoom-out", Gtk.IconSize.MENU))
+        zoom_out_item.set_always_show_image(True)
+        zoom_out_item.connect("activate", self.on_zoom_out)
+        zoom_out_item.add_accelerator("activate", self.accel_group, Gdk.KEY_minus, Gdk.ModifierType.CONTROL_MASK, Gtk.AccelFlags.VISIBLE)
+        view_menu.append(zoom_out_item)
+        
+        menubar.append(view_item)
+
+        # Document Menu
+        doc_menu = Gtk.Menu()
+        doc_item = Gtk.MenuItem(label="Document")
+        doc_item.set_submenu(doc_menu)
+        
+        # Word Wrap
+        self.wrap_chk = Gtk.CheckMenuItem(label="Word Wrap")
+        self.wrap_chk.set_active(self.doc_word_wrap)
+        self.wrap_chk.connect("toggled", self.on_toggle_word_wrap)
+        doc_menu.append(self.wrap_chk)
+        
+        # Auto Indent
+        self.indent_chk = Gtk.CheckMenuItem(label="Auto Indent")
+        self.indent_chk.set_active(self.doc_auto_indent)
+        self.indent_chk.connect("toggled", self.on_toggle_auto_indent)
+        doc_menu.append(self.indent_chk)
+        
+        # Tab Size Submenu
+        tab_size_item = Gtk.MenuItem(label="Tab Size")
+        tab_size_menu = Gtk.Menu()
+        tab_size_item.set_submenu(tab_size_menu)
+        
+        for size in [2, 4, 8]:
+             item = Gtk.RadioMenuItem(label=str(size))
+             if size == self.doc_tab_size:
+                 item.set_active(True)
+             item.connect("activate", self.on_change_tab_size, size)
+             tab_size_menu.append(item)
+        doc_menu.append(tab_size_item)
+        
+        # Filetype Submenu (Simplified)
+        filetype_item = Gtk.MenuItem(label="Filetype")
+        filetype_menu = Gtk.Menu()
+        filetype_item.set_submenu(filetype_menu)
+        
+        # Common languages
+        common_langs = ["Plain Text", "Python", "C", "C++", "Java", "JavaScript", "HTML", "CSS", "Markdown"]
+        for lang in common_langs:
+             item = Gtk.MenuItem(label=lang)
+             item.connect("activate", self.on_change_filetype, lang)
+             filetype_menu.append(item)
+        doc_menu.append(filetype_item)
+
+        # Line Ending Submenu
+        le_item = Gtk.MenuItem(label="Line Ending")
+        le_menu = Gtk.Menu()
+        le_item.set_submenu(le_menu)
+        
+        for le, label in [("\n", "Unix (LF)"), ("\r\n", "Windows (CRLF)"), ("\r", "Mac (CR)")]:
+             item = Gtk.MenuItem(label=label)
+             item.connect("activate", self.on_change_line_ending, le)
+             le_menu.append(item)
+        doc_menu.append(le_item)
+        
+        # Unicode BOM
+        self.bom_chk = Gtk.CheckMenuItem(label="Write Unicode BOM")
+        self.bom_chk.set_active(self.doc_write_bom)
+        self.bom_chk.connect("toggled", self.on_toggle_bom)
+        doc_menu.append(self.bom_chk)
+        
+        # Viewer Mode
+        self.viewmode_chk = Gtk.CheckMenuItem(label="Viewer Mode")
+        self.viewmode_chk.set_active(self.doc_viewer_mode)
+        self.viewmode_chk.connect("toggled", self.on_toggle_viewer_mode)
+        doc_menu.append(self.viewmode_chk)
+        
+        doc_menu.append(Gtk.SeparatorMenuItem())
+        
+        # Navigation
+        prev_tab = Gtk.MenuItem(label="Previous Tab")
+        prev_tab.connect("activate", self.on_prev_tab)
+        prev_tab.add_accelerator("activate", self.accel_group, Gdk.KEY_Page_Up, Gdk.ModifierType.CONTROL_MASK, Gtk.AccelFlags.VISIBLE)
+        doc_menu.append(prev_tab)
+
+        next_tab = Gtk.MenuItem(label="Next Tab")
+        next_tab.connect("activate", self.on_next_tab)
+        next_tab.add_accelerator("activate", self.accel_group, Gdk.KEY_Page_Down, Gdk.ModifierType.CONTROL_MASK, Gtk.AccelFlags.VISIBLE)
+        doc_menu.append(next_tab)
+        
+        doc_menu.append(Gtk.SeparatorMenuItem())
+        
+        # Dynamic Tab List (Placeholder / Simple)
+        # We'll rely on on_tab_switched to update this if we wanted full dynamic
+        
+        menubar.append(doc_item)
         
         # Help Menu
         help_menu = Gtk.Menu()
@@ -475,16 +709,85 @@ class ZenpadWindow(Gtk.ApplicationWindow):
         
         self.search_bar_revealer.add(self.search_box)
     
+    def on_toggle_incremental(self, widget):
+        self.incremental_search = widget.get_active()
+        # If turned ON, maybe trigger search now?
+        if self.incremental_search:
+            text = self.search_entry.get_text()
+            if text:
+                self.search_settings.set_search_text(text)
+
+    def on_toggle_highlight(self, widget):
+        self.highlight_all = widget.get_active()
+        n_pages = self.notebook.get_n_pages()
+        for i in range(n_pages):
+            editor = self.notebook.get_nth_page(i)
+            if editor.search_context:
+                editor.search_context.set_highlight(self.highlight_all)
+
+    def on_goto_line(self, widget, param=None):
+        page_num = self.notebook.get_current_page()
+        if page_num == -1: return
+        editor = self.notebook.get_nth_page(page_num)
+        
+        dialog = Gtk.Dialog(title="Go to Line", parent=self, flags=0)
+        dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_JUMP_TO, Gtk.ResponseType.OK)
+        
+        box = dialog.get_content_area()
+        box.set_spacing(10)
+        box.set_border_width(10)
+        
+        hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
+        hbox.pack_start(Gtk.Label(label="Line Number:"), False, False, 0)
+        
+        entry = Gtk.Entry()
+        entry.set_activates_default(True)
+        hbox.pack_start(entry, True, True, 0)
+        box.add(hbox)
+        
+        dialog.set_default_response(Gtk.ResponseType.OK)
+        dialog.show_all()
+        
+        response = dialog.run()
+        if response == Gtk.ResponseType.OK:
+            text = entry.get_text()
+            if text.isdigit():
+                line = int(text) - 1 # 0-indexed
+                buff = editor.buffer
+                if line < 0: line = 0
+                total = buff.get_line_count()
+                if line >= total: line = total - 1
+                
+                iter_jump = buff.get_iter_at_line(line)
+                editor.view.scroll_to_iter(iter_jump, 0.0, True, 0.0, 0.5)
+                buff.place_cursor(iter_jump)
+        
+        dialog.destroy()
+
     def on_search_text_changed(self, entry):
         text = entry.get_text()
-        self.search_settings.set_search_text(text)
+        if self.incremental_search:
+            self.search_settings.set_search_text(text)
+        else:
+             # If incremental is off, we clear the search settings logic?
+             # No, simply don't update it yet. The user sees "text" in entry but "highlight" matches old text?
+             # Ideally "Incremental Off" means "don't search yet".
+             # If I don't update settings, highlighting remains on OLD text.
+             # Maybe I should clear settings text if I want "no search"?
+             # But usually it just means "don't update".
+             pass
         
     def on_search_settings_changed(self, widget):
         self.search_settings.set_case_sensitive(self.match_case_check.get_active())
         self.search_settings.set_at_word_boundaries(self.whole_word_check.get_active())
         self.search_settings.set_regex_enabled(self.regex_check.get_active())
         
-    def on_search_next(self, widget):
+    def on_search_next(self, widget, param=None):
+        # Update text if incremental is off
+        if not self.incremental_search:
+             text = self.search_entry.get_text()
+             self.search_settings.set_search_text(text)
+
         page_num = self.notebook.get_current_page()
         if page_num == -1: return
         editor = self.notebook.get_nth_page(page_num)
@@ -528,7 +831,12 @@ class ZenpadWindow(Gtk.ApplicationWindow):
                     buff.select_range(match_end, match_start)
                     editor.view.scroll_to_iter(match_start, 0.0, True, 0.0, 0.5)
 
-    def on_search_prev(self, widget):
+    def on_search_prev(self, widget, param=None):
+        # Update text if incremental is off
+        if not self.incremental_search:
+             text = self.search_entry.get_text()
+             self.search_settings.set_search_text(text)
+
         page_num = self.notebook.get_current_page()
         if page_num == -1: return
         editor = self.notebook.get_nth_page(page_num)
@@ -605,6 +913,138 @@ class ZenpadWindow(Gtk.ApplicationWindow):
             editor = self.notebook.get_nth_page(page_num)
             if editor.buffer.can_redo():
                 editor.buffer.redo()
+
+    def on_zoom_in(self, widget, param=None):
+        n_pages = self.notebook.get_n_pages()
+        for i in range(n_pages):
+            editor = self.notebook.get_nth_page(i)
+            editor.zoom_in()
+
+    def on_zoom_out(self, widget, param=None):
+        n_pages = self.notebook.get_n_pages()
+        for i in range(n_pages):
+            editor = self.notebook.get_nth_page(i)
+            editor.zoom_out()
+
+    def on_select_font(self, widget):
+        dialog = Gtk.FontChooserDialog(title="Select Font", parent=self)
+        if self.notebook.get_n_pages() > 0:
+             # Set current font of first tab as initial
+             first = self.notebook.get_nth_page(0)
+             dialog.set_font_desc(first.font_desc)
+             
+        response = dialog.run()
+        if response == Gtk.ResponseType.OK:
+            font_desc = dialog.get_font_desc()
+            n_pages = self.notebook.get_n_pages()
+            for i in range(n_pages):
+                editor = self.notebook.get_nth_page(i)
+                editor.font_desc = font_desc
+                editor.view.modify_font(font_desc)
+        dialog.destroy()
+
+    def on_change_scheme(self, widget, scheme_id):
+        if widget.get_active():
+            n_pages = self.notebook.get_n_pages()
+            for i in range(n_pages):
+                editor = self.notebook.get_nth_page(i)
+                editor.set_scheme(scheme_id)
+
+    def on_toggle_line_numbers(self, widget):
+        self.show_line_numbers = widget.get_active()
+        n_pages = self.notebook.get_n_pages()
+        for i in range(n_pages):
+            editor = self.notebook.get_nth_page(i)
+            editor.view.set_show_line_numbers(self.show_line_numbers)
+
+    def on_toggle_menubar_state(self, action, value):
+        action.set_state(value)
+        self.show_menubar = value.get_boolean()
+        self.menubar.set_visible(self.show_menubar)
+
+    def on_toggle_toolbar_state(self, action, value):
+        action.set_state(value)
+        self.show_toolbar = value.get_boolean()
+        self.toolbar.set_visible(self.show_toolbar)
+
+    def on_toggle_statusbar_state(self, action, value):
+        action.set_state(value)
+        self.show_statusbar = value.get_boolean()
+        self.statusbar.set_visible(self.show_statusbar)
+
+    def on_toggle_fullscreen_state(self, action, value):
+        action.set_state(value)
+        self.is_fullscreen = value.get_boolean()
+        if self.is_fullscreen:
+            self.fullscreen()
+        else:
+            self.unfullscreen()
+
+    def on_toggle_word_wrap(self, widget):
+        self.doc_word_wrap = widget.get_active()
+        n_pages = self.notebook.get_n_pages()
+        for i in range(n_pages):
+            editor = self.notebook.get_nth_page(i)
+            editor.view.set_wrap_mode(Gtk.WrapMode.WORD if self.doc_word_wrap else Gtk.WrapMode.NONE)
+
+    def on_toggle_auto_indent(self, widget):
+        self.doc_auto_indent = widget.get_active()
+        n_pages = self.notebook.get_n_pages()
+        for i in range(n_pages):
+            editor = self.notebook.get_nth_page(i)
+            editor.view.set_auto_indent(self.doc_auto_indent)
+
+    def on_change_tab_size(self, widget, size):
+        if widget.get_active():
+            self.doc_tab_size = size
+            n_pages = self.notebook.get_n_pages()
+            for i in range(n_pages):
+                editor = self.notebook.get_nth_page(i)
+                editor.view.set_tab_width(size)
+
+    def on_change_filetype(self, widget, lang_name):
+        # Simple mapping or lookup
+        manager = GtkSource.LanguageManager.get_default()
+        lang_id = lang_name.lower().replace(" ", "-").replace("++", "pp")
+        if lang_name == "Plain Text": lang_id = None
+        
+        # Try to find it
+        language = manager.get_language(lang_id) if lang_id else None
+        
+        n_pages = self.notebook.get_n_pages()
+        for i in range(n_pages):
+            editor = self.notebook.get_nth_page(i)
+            editor.buffer.set_language(language)
+
+    def on_change_line_ending(self, widget, le):
+        self.doc_line_ending = le
+        # In reality, this would require converting buffer text
+        pass
+
+    def on_toggle_bom(self, widget):
+        self.doc_write_bom = widget.get_active()
+
+    def on_toggle_viewer_mode(self, widget):
+        self.doc_viewer_mode = widget.get_active()
+        n_pages = self.notebook.get_n_pages()
+        for i in range(n_pages):
+            editor = self.notebook.get_nth_page(i)
+            # Read only = not editable
+            editor.view.set_editable(not self.doc_viewer_mode)
+
+    def on_prev_tab(self, widget):
+        curr = self.notebook.get_current_page()
+        if curr > 0:
+            self.notebook.set_current_page(curr - 1)
+        elif curr == 0 and self.notebook.get_n_pages() > 1:
+            self.notebook.set_current_page(self.notebook.get_n_pages() - 1) # Wrap
+
+    def on_next_tab(self, widget):
+        curr = self.notebook.get_current_page()
+        if curr < self.notebook.get_n_pages() - 1:
+            self.notebook.set_current_page(curr + 1)
+        elif curr == self.notebook.get_n_pages() -1:
+             self.notebook.set_current_page(0) # Wrap
 
     def on_delete_selection(self, widget):
         page_num = self.notebook.get_current_page()
@@ -791,6 +1231,15 @@ class ZenpadWindow(Gtk.ApplicationWindow):
             ("detach_tab", self.on_detach_tab),
             ("find", lambda *args: self.on_find_clicked("find")),
             ("replace", lambda *args: self.on_find_clicked("replace")),
+            ("find_next", self.on_search_next),
+            ("find_prev", self.on_search_prev),
+            ("find_prev", self.on_search_prev),
+            ("indent", lambda *args: self.on_indent(True)),
+            ("unindent", lambda *args: self.on_indent(False)),
+            ("undo", lambda *args: self.on_undo(None)),
+            ("redo", lambda *args: self.on_redo(None)),
+            ("zoom_in", self.on_zoom_in),
+            ("zoom_out", self.on_zoom_out),
             ("close_tab", self.on_close_current_tab),
             ("close_window", lambda *args: self.close()),
             ("quit", lambda *args: self.get_application().quit())
@@ -800,6 +1249,21 @@ class ZenpadWindow(Gtk.ApplicationWindow):
             action = Gio.SimpleAction.new(name, None)
             action.connect("activate", callback)
             action_group.add_action(action)
+        
+        # Stateful Actions (View Toggles)
+        toggles = [
+            ("toggle_menubar", self.show_menubar, self.on_toggle_menubar_state),
+            ("toggle_toolbar", self.show_toolbar, self.on_toggle_toolbar_state),
+            ("toggle_statusbar", self.show_statusbar, self.on_toggle_statusbar_state),
+            ("toggle_fullscreen", self.is_fullscreen, self.on_toggle_fullscreen_state)
+        ]
+        
+        for name, state, callback in toggles:
+            action = Gio.SimpleAction.new_stateful(name, None, GLib.Variant.new_boolean(state))
+            action.connect("change-state", callback)
+            action_group.add_action(action)
+
+        self.insert_action_group("win", action_group)
         
         # Accelerators
         app = self.get_application()
@@ -813,9 +1277,18 @@ class ZenpadWindow(Gtk.ApplicationWindow):
         app.set_accels_for_action("win.detach_tab", ["<Primary>d"])
         app.set_accels_for_action("win.find", ["<Primary>f"])
         app.set_accels_for_action("win.replace", ["<Primary>h"])
-        # F3 for next
-        # Actions for F3 need to be registered too? Or simple accelerator for find_next?
-        # Let's add find_next/prev actions
+        app.set_accels_for_action("win.find_replace", ["<Primary>r"])
+        app.set_accels_for_action("win.find_next", ["<Primary>g", "F3"])
+        app.set_accels_for_action("win.find_prev", ["<Primary><Shift>g", "<Shift>F3"])
+        app.set_accels_for_action("win.goto_line", ["<Primary>l"])
+        app.set_accels_for_action("win.indent", ["<Primary>i"])
+        app.set_accels_for_action("win.unindent", ["<Primary>u"])
+        app.set_accels_for_action("win.undo", ["<Primary>z"])
+        app.set_accels_for_action("win.redo", ["<Primary>y", "<Primary><Shift>z"])
+        app.set_accels_for_action("win.zoom_in", ["<Primary>plus", "<Primary>equal"])
+        app.set_accels_for_action("win.zoom_out", ["<Primary>minus"])
+        app.set_accels_for_action("win.toggle_menubar", ["<Primary>m"])
+        app.set_accels_for_action("win.toggle_fullscreen", ["F11"])
         app.set_accels_for_action("win.close_tab", ["<Primary>w"])
         app.set_accels_for_action("win.close_window", ["<Primary><Shift>w"])
         app.set_accels_for_action("win.quit", ["<Primary>q"])
@@ -1033,7 +1506,8 @@ class ZenpadWindow(Gtk.ApplicationWindow):
     def on_close_clicked(self, editor):
         page_num = self.notebook.page_num(editor)
         if page_num != -1:
-            self.close_tab(page_num)
+            if self.check_unsaved_changes(editor):
+                self.close_tab(page_num)
 
     def on_open_file(self, widget, param=None):
         dialog = Gtk.FileChooserDialog(
@@ -1114,6 +1588,52 @@ class ZenpadWindow(Gtk.ApplicationWindow):
         except Exception as e:
             print(f"Error saving file: {e}")
 
+    def check_unsaved_changes(self, editor):
+        if editor.buffer.get_modified():
+            filename = os.path.basename(editor.file_path) if editor.file_path else "Untitled"
+            dialog = Gtk.MessageDialog(
+                transient_for=self,
+                flags=0,
+                message_type=Gtk.MessageType.WARNING,
+                buttons=Gtk.ButtonsType.NONE,
+                text=f"Save changes to document \"{filename}\" before closing?",
+            )
+            dialog.add_buttons(
+                "Close without Saving", Gtk.ResponseType.REJECT,
+                Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                Gtk.STOCK_SAVE, Gtk.ResponseType.YES,
+            )
+            dialog.format_secondary_text("If you don't save, changes will be permanently lost.")
+            
+            response = dialog.run()
+            dialog.destroy()
+            
+            if response == Gtk.ResponseType.YES:
+                self.on_save_file(None)
+                # Check if save was successful (buffer not modified)
+                if editor.buffer.get_modified():
+                    return False # Save failed or cancelled
+                return True
+            elif response == Gtk.ResponseType.REJECT:
+                return True # Close without saving
+            else:
+                return False # Cancel
+        return True
+
+    def on_close_current_tab(self, widget=None, param=None):
+        page_num = self.notebook.get_current_page()
+        if page_num != -1:
+            editor = self.notebook.get_nth_page(page_num)
+            if self.check_unsaved_changes(editor):
+                self.close_tab(page_num)
+
+    def close_tab(self, page_num):
+        editor = self.notebook.get_nth_page(page_num)
+        self.notebook.remove_page(page_num)
+        # If no pages, maybe new tab? or empty?
+        if self.notebook.get_n_pages() == 0:
+            self.on_new_tab(None)
+
     def on_tab_switched(self, notebook, page, page_num):
         editor = self.notebook.get_nth_page(page_num)
         self.update_statusbar(editor)
@@ -1128,11 +1648,26 @@ class ZenpadWindow(Gtk.ApplicationWindow):
 
         self.current_buffer = editor.buffer
         self.current_cursor_handler = editor.buffer.connect("notify::cursor-position", lambda w, p: self.update_statusbar(editor))
+        
+        # Update window title
+        filename = os.path.basename(editor.file_path) if editor.file_path else "Untitled"
+        self.set_title(f"{filename} - Zenpad")
 
 
     def update_statusbar(self, editor):
         line, col = editor.get_cursor_position()
-        self.statusbar.push(0, f"Line {line}, Column {col}")
+        
+        # Info
+        encoding = "UTF-8" # Default for now
+        le_label = {
+            "\n": "Unix (LF)",
+            "\r\n": "Windows (CRLF)",
+            "\r": "Mac (CR)",
+            "Current": "Unix (LF)" # Default assumption
+        }.get(self.doc_line_ending, "Unix (LF)")
+        
+        self.statusbar.pop(0) # Remove old
+        self.statusbar.push(0, f"Line {line}, Column {col}  |  {encoding}  |  {le_label}")
 
     def on_preferences_clicked(self, widget):
         dialog = PreferencesDialog(self)
@@ -1157,20 +1692,35 @@ class ZenpadWindow(Gtk.ApplicationWindow):
         # Also store these settings to persistence if needed (not implemented yet)
 
     def save_session(self, widget, event):
-        paths = []
+        # 1. Check for unsaved changes in ALL tabs
         n_pages = self.notebook.get_n_pages()
         for i in range(n_pages):
             editor = self.notebook.get_nth_page(i)
-            if editor.file_path:
-                paths.append(editor.file_path)
+            if not self.check_unsaved_changes(editor):
+                return True # Cancel close
+
+        # 2. Save Session Data
+        session_data = {
+            "window_size": self.get_size(),
+            "files": []
+        }
         
-        config_dir = os.path.join(os.path.expanduser("~"), ".config", "zenpad")
-        os.makedirs(config_dir, exist_ok=True)
-        
-        with open(os.path.join(config_dir, "session.json"), "w") as f:
-            json.dump(paths, f)
+        for i in range(n_pages):
+             editor = self.notebook.get_nth_page(i)
+             if editor.file_path:
+                 session_data["files"].append(editor.file_path)
+                 
+        try:
+            config_dir = os.path.join(os.path.expanduser("~"), ".config", "zenpad")
+            if not os.path.exists(config_dir):
+                os.makedirs(config_dir)
             
-        return False # Propagate Close
+            with open(os.path.join(config_dir, "session.json"), "w") as f:
+                json.dump(session_data, f)
+        except Exception as e:
+            print(f"Error saving session: {e}")
+            
+        return False # Allow closing
 
     def load_session(self):
         config_path = os.path.join(os.path.expanduser("~"), ".config", "zenpad", "session.json")
@@ -1201,8 +1751,8 @@ class ZenpadWindow(Gtk.ApplicationWindow):
         about.set_program_name("Zenpad")
         about.set_version("0.1.0")
         about.set_copyright("Copyright \u00A9 2025 - Zenpad Developers")
-        about.set_comments("Zenpad is a simple text editor for the Linux desktop environment,\ndesigned as a Mousepad clone.")
-        about.set_website("https://github.com/example/zenpad")
+        about.set_comments("Zenpad is a simple text editor for the Linux desktop environment.\n\n")
+        about.set_website("https://github.com/jagdishtripathy/zenpad")
         about.set_website_label("Website")
         
         about.set_authors(["Zenpad Developer Team"])
