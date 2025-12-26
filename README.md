@@ -4,7 +4,7 @@
 ![License GPL-2.0](https://img.shields.io/badge/license-GPL--2.0-green.svg)
 ![Platform Linux](https://img.shields.io/badge/platform-linux-lightgrey.svg)
 
-**Zenpad** is a lightweight, high-performance text editor for the Linux desktop, built with Python and GTK+. detailed to provide a distraction-free coding environment, it combines the speed of a simple notepad with the essential features required by developers and power users.
+**Zenpad** is a lightweight, keyboard-driven text editor for the Linux desktop, built with Python and GTK+. Designed to provide a distraction-free environment for power users and developers, it combines the speed of a simple notepad with IDE-inspired keyboard shortcuts for fast navigation, text manipulation, and efficient editing. Unlike traditional click-based editors, Zenpad focuses on a keyboard-centric workflow to maximize productivity.
 
 ## Table of Contents
 - [Features](#features)
