@@ -1,4 +1,5 @@
 import sys
+import argparse
 import gi
 
 gi.require_version('Gtk', '3.0')
@@ -21,29 +22,37 @@ class ZenpadApplication(Gtk.Application):
 
     def do_command_line(self, command_line):
         args = command_line.get_arguments()
+        # args[0] is program name
         
-        # Check for quit flag
-        if len(args) > 1 and args[1] in ["--quit", "-q"]:
-            self.quit()
+        parser = argparse.ArgumentParser(prog="zenpad", description="Zenpad Text Editor")
+        parser.add_argument("files", nargs="*", help="Files to open")
+        parser.add_argument("-v", "--version", action="store_true", help="Print version information and exit")
+        parser.add_argument("-q", "--quit", action="store_true", help="Quit the running instance")
+        
+        # Parse arguments (skip program name)
+        try:
+            parsed_args = parser.parse_args(args[1:])
+        except SystemExit:
+            # argparse calls sys.exit() on error or help, we just want to return
             return 0
-
-        # Check for version flag
-        if len(args) > 1 and args[1] in ["--version", "-v"]:
+            
+        if parsed_args.version:
             print("Zenpad v1.0.0")
+            return 0
+            
+        if parsed_args.quit:
+            self.quit()
             return 0
 
         self.activate()
         
-        # Args[0] is usually the program name, files follow~
-        if len(args) > 1:
-            for filename in args[1:]:
-                # We need to tell the window to open this file
-                # Since window logic for opening is inside ZenpadWindow, we'll expose a method or reuse on_open_file logic
-                # But on_open_file is UI driven. 
-                # Ideally ZenpadWindow has an open_file(path) method.
-                # Let's check window.py again, add_tab exists.
+
+        # Open Files
+        if parsed_args.files:
+            for filename in parsed_args.files:
+                # Basic open for now in this commit
                 self.window.open_file_from_path(filename)
-                
+
         return 0
 
 def main():
