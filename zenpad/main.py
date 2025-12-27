@@ -22,6 +22,11 @@ class ZenpadApplication(Gtk.Application):
     def do_command_line(self, command_line):
         args = command_line.get_arguments()
         
+        # Check for quit flag
+        if len(args) > 1 and args[1] in ["--quit", "-q"]:
+            self.quit()
+            return 0
+
         # Check for version flag
         if len(args) > 1 and args[1] in ["--version", "-v"]:
             print("Zenpad v1.0.0")
