@@ -15,7 +15,7 @@ class ZenpadApplication(Gtk.Application):
         self.window = None
         Gtk.Window.set_default_icon_name("accessories-text-editor")
 
-    def do_activate(self):
+    def do_activate(self):  
         if not self.window:
             self.window = ZenpadWindow(application=self)
         self.window.present()
