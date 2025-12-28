@@ -56,8 +56,7 @@ The recommended way to install Zenpad is via the pre-built Debian package.
 To run Zenpad directly from the source code:
 
 ```bash
-# Implement standard setuptools installation or run directly
-python3 setup.py install --user
+pip install .
 ```
 
 ## Usage
