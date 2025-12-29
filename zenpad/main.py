@@ -1,5 +1,4 @@
 import sys
-import os
 import argparse
 import gi
 
@@ -48,7 +47,7 @@ class ZenpadApplication(Gtk.Application):
             return 0
             
         if parsed_args.version:
-            print("Zenpad v1.1.0")
+            print("Zenpad v1.0.0")
             return 0
             
         if parsed_args.list_encodings:
@@ -60,7 +59,7 @@ class ZenpadApplication(Gtk.Application):
         if parsed_args.quit:
             self.quit()
             return 0
-                                                                                                            
+
         self.activate()
         
         # Handle Preferences
@@ -70,13 +69,8 @@ class ZenpadApplication(Gtk.Application):
                  self.window.on_preferences_clicked(None)
 
         # Open Files
-        cwd = command_line.get_cwd()
         if parsed_args.files:
             for filename in parsed_args.files:
-                # Resolve relative path
-                if not os.path.isabs(filename) and cwd:
-                    filename = os.path.join(cwd, filename)
-                
                 self.window.open_file_from_path(filename, line=parsed_args.line, column=parsed_args.column, encoding=parsed_args.encoding)
 
         return 0
