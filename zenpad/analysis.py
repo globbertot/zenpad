@@ -119,10 +119,31 @@ def detect_language_by_content(text):
        (text.startswith("[") and text.endswith("]")):
         # Quick check if it looks valid-ish
         try:
+            # Check if it's purely empty brackets/braces (ignoring all whitespace)
+            # text.strip() only handles ends. We need to handle internals (newlines, indent).
+            
+            # Simple check: remove all whitespace
+            import string
+            # faster than regex for simple check
+            no_space = "".join(text.split())
+            if no_space == "{}" or no_space == "[]":
+                 # Ambiguous. Could be Python dict, JS block, C block, etc.
+                 # Prefer avoiding JSON lock-in until we see data.
+                 return None
+                 
             json.loads(text)
             return "json"
         except:
-            pass # Looked like JSON but wasn't valid, falls through
+             # Sometimes incomplete JSON is being typed
+             # Heuristic: First line is { or [
+             # Check for "Key": Value pattern to distinguish from C/JS blocks
+             if text.startswith("{"):
+                 if re.search(r'"[^"]*"\s*:', text):
+                     return "json"
+             # Arrays are ambiguous (Json vs Python), but often JSON is acceptable default if purely data
+             elif text.startswith("["):
+                 # If it looks like a list interaction
+                 return "json"
 
     # 3. HTML / XML (Tags)
     if "<html" in text.lower() or "<!doctype html" in text.lower():
@@ -130,31 +151,58 @@ def detect_language_by_content(text):
     if "<?xml" in text.lower():
         return "xml"
     
+    # Generic XML check (Tags)
+    # Look for at least one tag <tag> and maybe </tag>
+    if "<" in text and ">" in text:
+        # Avoid identifying C includes or comparisons like a < b
+        # Check for standard XML tag pattern
+        if re.search(r'<[a-zA-Z0-9_-]+.*?>', text):
+             if "</body>" in text or "</div>" in text:
+                 return "html"
+             return "xml"
+    
     # 4. Content Heuristics (Keywords)
     # We check the first ~1000 chars to avoid scanning massive files
     sample = text[:1000]
     
     # Python
-    if "def " in sample and ":" in sample and ("import " in sample or "print(" in sample):
-         return "python"
+    # Check for keywords OR characteristic indentation structures
+    if "def " in sample and ":" in sample: return "python"
+    if "class " in sample and ":" in sample: return "python"
+    if "import " in sample and "from " in sample: return "python"
+    if "import " in sample and "os " in sample: return "python"
+    if "if __name__" in sample: return "python"
     
     # C / C++
-    if "#include <" in sample or ("int main(" in sample and "{" in sample):
-        return "c" # GtkSourceView often maps c/cpp/chdr sharing ids, 'c' is safe default
+    if "#include <" in sample: return "c"
+    if "int main(" in sample and "{" in sample: return "c"
+    if "std::" in sample or "cout <<" in sample: return "cpp"
         
     # JavaScript
-    if "function " in sample or "const " in sample or "let " in sample or "console.log(" in sample:
-        if "{" in sample and "}" in sample:
-            return "js"
+    # Keywords often found in modern JS
+    if "function " in sample and "{" in sample: return "js"
+    if "const " in sample and "=" in sample: return "js"
+    if "let " in sample and "=" in sample: return "js"
+    if "console.log(" in sample: return "js"
+    if "=>" in sample and ("const" in sample or "var" in sample): return "js"
+    if "document.getElementById" in sample: return "js"
             
     # CSS
     if "body {" in sample or "div {" in sample or ".class" in sample:
         if "{" in sample and ":" in sample and ";" in sample:
             return "css"
+    if "@media" in sample or "@import" in sample:
+        return "css"
 
     # Bash (if no shebang)
     if "echo " in sample and ("if [" in sample or "fi" in sample or "sudo " in sample):
         return "sh"
+    if "export " in sample and "=" in sample: return "sh"
+    
+    # Markdown (Titles)
+    if sample.startswith("# ") or "\n# " in sample:
+        if "## " in sample or "**" in sample:
+             return "markdown"
 
     return None
 

@@ -31,6 +31,11 @@ class EditorTab(Gtk.ScrolledWindow):
         # Default Settings
         self.view.set_show_line_numbers(True)
         self.view.set_auto_indent(True)
+        self.view.set_indent_on_tab(True) # Indent on Tab key
+        if hasattr(self.view, "set_smart_backspace"):
+            self.view.set_smart_backspace(True) # Unindent on Backspace
+        self.view.set_indent_width(-1) # Use tab width for indent width
+        
         self.view.set_highlight_current_line(True)
         self.view.set_wrap_mode(Gtk.WrapMode.WORD)
         self.view.set_left_margin(6)
@@ -45,6 +50,9 @@ class EditorTab(Gtk.ScrolledWindow):
         
         # Handle scrolling (for zoom-in-out)
         self.view.connect('scroll-event', self.on_scroll)
+        
+        # Handle smart indentation on Enter
+        self.view.connect("key-press-event", self.on_key_press)
 
         self.add(self.view)
         self.show_all()
@@ -137,3 +145,226 @@ class EditorTab(Gtk.ScrolledWindow):
             self.zoom_out()
 
         return True
+
+    def on_key_press(self, widget, event):
+        """
+        Handles smart indentation on Enter key.
+        Global logic:
+        - Check previous line indentation.
+        - Check for openers: {, [, (, :
+        - Increase indent if opener found.
+        """
+        keyval = event.keyval
+        if keyval in [Gdk.KEY_Return, Gdk.KEY_KP_Enter]:
+            if (event.state & Gdk.ModifierType.SHIFT_MASK) or (event.state & Gdk.ModifierType.CONTROL_MASK):
+                return False
+                
+            buff = self.buffer
+            lang = buff.get_language()
+            lang_id = lang.get_id() if lang else None
+            
+            # User Requirement: No language = no smart indentation?
+            # actually, users want smart features even in Untitled buffers if they type code.
+            # So we allow None to fall through to structural checks.
+            # if not lang_id: return False <- REMOVED
+            
+            insert = buff.get_insert()
+            iter_cur = buff.get_iter_at_mark(insert)
+            
+            # Get current line text up to cursor
+            line_num = iter_cur.get_line()
+            iter_start = buff.get_iter_at_line(line_num)
+            line_text = buff.get_text(iter_start, iter_cur, False)
+            
+            # Calculate current indentation
+            indentation = ""
+            for char in line_text:
+                if char in [' ', '\t']:
+                    indentation += char
+                else:
+                    break
+            
+            # Check for structural openers at the end of the text (ignoring trailing whitespace)
+            stripped = line_text.strip()
+            should_indent = False
+            
+            # Check for Enter between braces: {|} -> Expand
+            # Need to peek at the character *after* the cursor
+            char_after = ""
+            if not iter_cur.is_end():
+                iter_next = iter_cur.copy()
+                iter_next.forward_char()
+                char_after = buff.get_text(iter_cur, iter_next, False)
+            
+            is_expansion = False
+            
+            # Language-Aware Logic
+            if stripped:
+                # Group 1: BRACE/BLOCK Languages (C-like, Python, JSON, JS, AND Untitled/None)
+                # We assume generic brace behavior for Plain Text (None)
+                brace_langs = ["python", "c", "cpp", "chdr", "java", "js", "javascript", "json", "css", "rust", "go", "text"]
+                
+                is_brace_lang = (lang_id is None) or (lang_id in brace_langs) or ("json" in lang_id) or ("python" in lang_id) or (lang_id == "text")
+                
+                if is_brace_lang:
+                    last_char = stripped[-1]
+                    if last_char in ['{', '[', '(', ':']:
+                        should_indent = True
+                        
+                        # Check for expansion: {|} or [|]
+                        if last_char == '{' and char_after == '}': is_expansion = True
+                        if last_char == '[' and char_after == ']': is_expansion = True
+                        if last_char == '(' and char_after == ')': is_expansion = True
+                
+                # Group 2: SHELL (Bash) - Strict Check
+                if lang_id in ["sh", "bash", "zsh", "application-x-shellscript"]:
+                    tokens = stripped.split()
+                    if tokens:
+                        last = tokens[-1]
+                        if last in ["then", "do", "else", "elif"]:
+                            should_indent = True
+                            
+                # Group 3: TAG Languages (HTML, XML)
+                tag_langs = ["xml", "html", "markdown", "php"]
+                if lang_id in tag_langs:
+                    if stripped.endswith(">") and not stripped.endswith("/>") and not stripped.endswith("?>") and not stripped.endswith("-->"):
+                        # Check against closing tag
+                        r_index = stripped.rfind("<")
+                        if r_index != -1:
+                            tag_content = stripped[r_index:]
+                            if not tag_content.startswith("</"):
+                                should_indent = True
+                                # XML expansion <t>|</t> ?
+                                # Complex to check char_after for </tag> without parsing.
+                                # Leaving XML expansion simple for now.
+
+            # Construct insertion
+            to_insert = "\n" + indentation
+            
+            indent_str = ""
+            tab_width = self.view.get_tab_width()
+            if self.view.get_insert_spaces_instead_of_tabs():
+                 indent_str = " " * tab_width
+            else:
+                 indent_str = "\t"
+
+            if should_indent:
+                 to_insert += indent_str
+            
+            if is_expansion:
+                # We are expanding {|} to:
+                # {
+                #     |
+                # }
+                # indentation holds the BASE indent (of the { line)
+                # to_insert holds \n + BASE + INDENT
+                
+                # We need to append: \n + BASE + (closing brace)
+                # But wait, we are inserting AT cursor.
+                # So we insert: \n + BASE + INDENT + \n + BASE
+                # And assume the } is already there (char_after).
+                # Wait, if we insert text, the } moves.
+                
+                second_line = "\n" + indentation
+                to_insert += second_line
+                
+                # Insert
+                buff.begin_user_action()
+                buff.insert(iter_cur, to_insert)
+                buff.end_user_action()
+                
+                # Now we need to move cursor UP one line and to the end of that line
+                # (which is the indented position)
+                
+                # Current pos is after the inserted text (before the })
+                insert_mark = buff.get_insert()
+                iter_final = buff.get_iter_at_mark(insert_mark)
+                iter_final.backward_chars(len(second_line)) # Go back before the closing indentation
+                
+                buff.place_cursor(iter_final)
+                
+            else:
+                # Standard Indent
+                buff.begin_user_action()
+                buff.insert(iter_cur, to_insert)
+                buff.end_user_action()
+                self.view.scroll_to_mark(insert, 0.0, True, 0.0, 0.5)
+
+            return True
+
+        # Electric Brace Dedentation & Type-Over ( } ] ) )
+        if keyval in [Gdk.KEY_braceright, Gdk.KEY_bracketright, Gdk.KEY_parenright]:
+            buff = self.buffer
+            insert = buff.get_insert()
+            iter_cur = buff.get_iter_at_mark(insert)
+            
+            # Type-Over Logic: If next char is the one we are typing, just move cursor
+            # Get char at cursor
+            char_at_cursor = buff.get_text(iter_cur, buff.get_iter_at_offset(iter_cur.get_offset() + 1), False)
+            typed_char = chr(Gdk.keyval_to_unicode(keyval))
+            
+            if char_at_cursor == typed_char:
+                # Move cursor forward instead of typing
+                iter_cur.forward_char()
+                buff.place_cursor(iter_cur)
+                return True
+
+            # Dedentation Logic
+            # Enable for Brace Langs AND Untitled (None)
+            lang = buff.get_language()
+            lang_id = lang.get_id() if lang else None
+            
+            is_brace_lang = (lang_id is None) or (lang_id in ["python", "c", "cpp", "chdr", "java", "js", "javascript", "json", "css", "rust", "go", "text"]) or ("json" in str(lang_id)) or ("python" in str(lang_id)) 
+                     
+            if is_brace_lang:
+                line_num = iter_cur.get_line()
+                iter_start = buff.get_iter_at_line(line_num)
+                line_text = buff.get_text(iter_start, iter_cur, False)
+                
+                # Only dedent if line is currently pure whitespace (we are closing a block)
+                if len(line_text.strip()) == 0 and len(line_text) > 0:
+                     tab_width = self.view.get_tab_width()
+                     if len(line_text) >= tab_width:
+                         start_del = iter_cur.copy()
+                         start_del.backward_chars(tab_width)
+                         buff.begin_user_action()
+                         buff.delete(start_del, iter_cur)
+                         buff.end_user_action()
+            return False
+
+        # Auto-Pairing for Openers ( { [ ( )
+        if keyval in [Gdk.KEY_braceleft, Gdk.KEY_bracketleft, Gdk.KEY_parenleft]:
+            buff = self.buffer
+            lang = buff.get_language()
+            lang_id = lang.get_id() if lang else None
+            
+            # Apply generically for Code AND Untitled
+            # Avoid smart pairing only if user explicitly wants plain text behavior? 
+            # Zenpad seems to aim for "Smart Text Editor", so enabling by default for Untitled is safer for UX.
+            
+            should_pair = (lang_id is None) or (lang_id != "markdown") # Maybe exclude prose heavy? 
+            # Actually, standard VSCode pairs in markdown too usually.
+            
+            insert = buff.get_insert()
+            iter_cur = buff.get_iter_at_mark(insert)
+            
+            mapping = {
+                Gdk.KEY_braceleft: "{}",
+                Gdk.KEY_bracketleft: "[]",
+                Gdk.KEY_parenleft: "()"
+            }
+            
+            pair = mapping.get(keyval)
+            if pair:
+                buff.begin_user_action()
+                buff.insert_at_cursor(pair)
+                buff.end_user_action()
+                
+                # Move cursor back one step
+                insert = buff.get_insert()
+                iter_back = buff.get_iter_at_mark(insert)
+                iter_back.backward_char()
+                buff.place_cursor(iter_back)
+                return True
+            
+        return False

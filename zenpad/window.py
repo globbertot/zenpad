@@ -82,6 +82,13 @@ class ZenpadWindow(Gtk.ApplicationWindow):
 
         # 4. Status Bar
         self.statusbar = Gtk.Statusbar()
+        # Add Language Indicator Label
+        self.language_label = Gtk.Label(label="Plain Text")
+        self.language_label.set_margin_end(10)
+        # Pack at END of the box (GtkStatusbar is a GtkBox)
+        # Note: Gtk.Statusbar structure usually has a message_area (first child).
+        # We can pack_end to push it to the right corner.
+        self.statusbar.pack_end(self.language_label, False, False, 0)
         main_box.pack_end(self.statusbar, False, True, 0)
         
         # Shortcuts
@@ -1534,7 +1541,17 @@ class ZenpadWindow(Gtk.ApplicationWindow):
             editor.file_path = None
         
         # Tab Label (with close button)
-        hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
+        hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        hbox.set_spacing(5)
+        
+        # Icon (Default hidden for untitled/new)
+        icon = Gtk.Image.new_from_icon_name("text-x-generic", Gtk.IconSize.MENU)
+        # Only show if we have a path (opened file) initially
+        if not path:
+             icon.set_visible(False)
+             icon.set_no_show_all(True) # Prevent show_all() from forcing it visible
+        hbox.pack_start(icon, False, False, 0)
+        
         label = Gtk.Label(label=title)
         hbox.pack_start(label, True, True, 0)
         
@@ -1559,6 +1576,8 @@ class ZenpadWindow(Gtk.ApplicationWindow):
         editor.buffer.connect("changed", lambda w: self.update_tab_label(editor))
         editor.buffer.connect("changed", lambda w: self.update_title(editor))
         editor.buffer.connect("mark-set", lambda w, loc, mark: self.update_match_count(editor))
+        # Language changed signal
+        editor.buffer.connect("notify::language", lambda w, p: self.update_tab_label(editor))
         # Search signals
         if editor.search_context:
              editor.search_context.connect("notify::occurrences-count", lambda w, p: self.update_match_count(editor))
@@ -1616,8 +1635,19 @@ class ZenpadWindow(Gtk.ApplicationWindow):
             hbox = tab_widget
             
         children = hbox.get_children()
-        if children:
-             label = children[0]
+        # Expecting [icon, label] or just [label] if previously created without icon
+        
+        # Helper to get exact widget
+        icon_widget = None
+        label_widget = None
+        
+        for child in children:
+            if isinstance(child, Gtk.Image):
+                icon_widget = child
+            elif isinstance(child, Gtk.Label):
+                label_widget = child
+        
+        if label_widget:
              name = os.path.basename(editor.file_path) if editor.file_path else "Untitled"
              
              # Check for unsaved changes
@@ -1627,10 +1657,34 @@ class ZenpadWindow(Gtk.ApplicationWindow):
              if editor.buffer.get_modified() and not saved:
                  name += " ●"
                  
-             label.set_text(name)
+             label_widget.set_text(name)
              if editor.file_path:
-                 # Update tooltip
                  tab_widget.set_tooltip_text(editor.file_path)
+
+        # Update Language Indicators
+        lang = editor.buffer.get_language()
+        lang_name = lang.get_name() if lang else "Plain Text"
+        lang_id = lang.get_id() if lang else None
+        
+        # 1. Update Status Bar (Only if current tab)
+        if page_num == self.notebook.get_current_page():
+            self.language_label.set_text(lang_name)
+            
+        # 2. Update Tab Icon
+        if icon_widget:
+            # Logic: Show icon if language is detected OR file has a path.
+            # Hide if plain text AND untitled (clean slate).
+            
+            is_plain = (lang_id is None or lang_id == "text")
+            is_untitled = (editor.file_path is None)
+            
+            if is_plain and is_untitled:
+                icon_widget.set_visible(False)
+            else:
+                icon_widget.set_visible(True)
+                icon_name = self.get_icon_name_for_language(lang_id)
+                icon_widget.set_from_icon_name(icon_name, Gtk.IconSize.MENU)
+
         
         # Update Window Title if this is the current tab
         if page_num == self.notebook.get_current_page():
@@ -2398,3 +2452,28 @@ class ZenpadWindow(Gtk.ApplicationWindow):
             editor.view.grab_focus()
         except Exception as e:
             print(f"Error going to line: {e}")
+
+    def get_icon_name_for_language(self, lang_id):
+        """Maps GtkSourceView language ID to standard icon name."""
+        if not lang_id: return "text-x-generic"
+        
+        # Map common IDs to icon names (Adwaita/Tango/Standard)
+        # Verify valid icon names on system if possible, but hardcoding safety is fine.
+        mapping = {
+            "python": "text-x-python",
+            "c": "text-x-csrc",
+            "cpp": "text-x-c++src", 
+            "chdr": "text-x-chdr",
+            "java": "text-x-java",
+            "js": "text-x-javascript",
+            "javascript": "text-x-javascript",
+            "json": "application-json", # often mimetype based
+            "xml": "text-xml",
+            "html": "text-html",
+            "css": "text-css",
+            "sh": "text-x-script",
+            "bash": "application-x-shellscript",
+            "markdown": "text-markdown"
+        }
+        
+        return mapping.get(lang_id, "text-x-generic")
