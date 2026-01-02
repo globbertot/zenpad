@@ -635,6 +635,11 @@ class ZenpadWindow(Gtk.ApplicationWindow):
         hex_item = Gtk.MenuItem(label="Hex View")
         hex_item.set_action_name("win.hex_view")
         tools_menu.append(hex_item)
+
+        hash_item = Gtk.MenuItem(label="Calculate Hash")
+        hash_item.set_action_name("win.calculate_hash")
+        hash_item.add_accelerator("activate", self.accel_group, Gdk.KEY_H, Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK, Gtk.AccelFlags.VISIBLE)
+        tools_menu.append(hash_item)
         
         menubar.append(tools_item)
         
@@ -1367,7 +1372,8 @@ class ZenpadWindow(Gtk.ApplicationWindow):
             ("format_json", self.on_format_json),
             ("format_xml", self.on_format_xml),
             ("convert_json", self.on_convert_json),
-            ("hex_view", self.on_hex_view)
+            ("hex_view", self.on_hex_view),
+            ("calculate_hash", self.on_calculate_hash)
         ])
 
         for name, callback in actions:
@@ -1568,7 +1574,7 @@ class ZenpadWindow(Gtk.ApplicationWindow):
         event_box.connect("button-press-event", self.on_tab_button_press, editor)
         event_box.show_all()
         
-        self.notebook.append_page(editor, event_box)
+        index = self.notebook.append_page(editor, event_box)
         self.notebook.show_all()
         
         # Connect signals
@@ -1618,7 +1624,7 @@ class ZenpadWindow(Gtk.ApplicationWindow):
         editor.buffer.set_modified(False)
         
         # Switch to the new tab
-        self.notebook.set_current_page(-1)
+        self.notebook.set_current_page(index)
         self.update_tab_label(editor)
         return editor
 
@@ -2218,21 +2224,56 @@ class ZenpadWindow(Gtk.ApplicationWindow):
 
     def on_convert_json(self, action, parameter):
         """Standard converter that makes a NEW TAB with the JSON"""
-        # We don't replace in-place because conversion is destructive/transformative
-        # and we want to keep the original log file intact.
+        import threading
+        from gi.repository import GLib
+
         page_num = self.notebook.get_current_page()
         if page_num == -1: return
         editor = self.notebook.get_nth_page(page_num)
         text = editor.get_text()
-
-        success, result, error = analysis.convert_to_json(text)
         
-        if success:
-             # Open in new tab
-             src_name = os.path.basename(editor.file_path) if editor.file_path else "Untitled"
-             self.add_tab(result, f"JSON: {src_name}")
-        else:
-             self.show_error(f"Failed to convert: {error}")
+        # 1. Prevent Recursive Freezing
+        # Strict Check: If language says JSON OR content looks like a JSON Object/Array
+        # This catches cases where auto-detection hasn't fired yet but content is clearly JSON.
+        lang = editor.buffer.get_language()
+        is_json_lang = (lang and "json" in lang.get_id())
+        
+        clean_text = text.strip()
+        looks_like_json = clean_text.startswith("{") or clean_text.startswith("[")
+        
+        if is_json_lang or looks_like_json:
+            self.show_error("Source is identified as JSON.\nConverting again avoids recursive wrapping.")
+            return
+
+        text = editor.get_text()
+        
+        # Show busy state (simple indicator)
+        # self.header.get_custom_title().set_subtitle("Converting...") # If we had one
+        
+        def run_conversion():
+            success, result, error = analysis.convert_to_json(text)
+            GLib.idle_add(complete_conversion, success, result, error)
+
+        def complete_conversion(success, result, error):
+            if success:
+                 # Open in new tab
+                 src_name = os.path.basename(editor.file_path) if editor.file_path else "Untitled"
+                 new_editor = self.add_tab(result, f"JSON: {src_name}")
+                 
+                 # Force language to JSON immediately to prevent race conditions
+                 # This ensures the recursion guard works instantly for the next click
+                 manager = GtkSource.LanguageManager.get_default()
+                 json_lang = manager.get_language("json")
+                 if json_lang and new_editor:
+                     new_editor.buffer.set_language(json_lang)
+                     
+            else:
+                 self.show_error(f"Failed to convert: {error}")
+        
+        # Run in thread
+        thread = threading.Thread(target=run_conversion)
+        thread.daemon = True
+        thread.start()
 
     def _run_formatter(self, func, name):
         """Helper to run a formatter on selection or whole file"""
@@ -2282,7 +2323,64 @@ class ZenpadWindow(Gtk.ApplicationWindow):
         new_editor.view.set_editable(False)
         # Maybe set a simpler highlighting or none
         new_editor.buffer.set_language(None)
-    
+    def on_calculate_hash(self, action, parameter):
+        page_num = self.notebook.get_current_page()
+        if page_num == -1: return
+        editor = self.notebook.get_nth_page(page_num)
+        buff = editor.buffer
+        
+        # Get content (Selection or Whole Doc)
+        if buff.get_has_selection():
+            start, end = buff.get_selection_bounds()
+            text = buff.get_text(start, end, True)
+            target_desc = "Selected Text"
+        else:
+            text = editor.get_text()
+            target_desc = "Document"
+            
+        hashes = analysis.calculate_hashes(text)
+        
+        # Build Dialog
+        dialog = Gtk.Dialog(title="Hash Calculator", transient_for=self, flags=0)
+        dialog.add_buttons("Close", Gtk.ResponseType.CLOSE)
+        
+        content_area = dialog.get_content_area()
+        grid = Gtk.Grid()
+        grid.set_column_spacing(10)
+        grid.set_row_spacing(10)
+        grid.set_margin_top(10)
+        grid.set_margin_bottom(10)
+        grid.set_margin_start(10)
+        grid.set_margin_end(10)
+        
+        row = 0
+        
+        # Header
+        lbl_info = Gtk.Label(label=f"<b>Hashes for {target_desc}</b>")
+        lbl_info.set_use_markup(True)
+        lbl_info.set_halign(Gtk.Align.START)
+        grid.attach(lbl_info, 0, row, 2, 1)
+        row += 1
+        
+        # Algo Rows
+        for algo, val in hashes.items():
+            lbl_algo = Gtk.Label(label=f"<b>{algo}:</b>")
+            lbl_algo.set_use_markup(True)
+            lbl_algo.set_halign(Gtk.Align.END)
+            
+            entry = Gtk.Entry()
+            entry.set_text(val)
+            entry.set_editable(False)
+            entry.set_width_chars(64) # Enough for SHA256 hex
+            
+            grid.attach(lbl_algo, 0, row, 1, 1)
+            grid.attach(entry, 1, row, 1, 1)
+            row += 1
+            
+        content_area.add(grid)
+        dialog.show_all()
+        dialog.run()
+        dialog.destroy()
     def on_toggle_comment(self, widget):
         page_num = self.notebook.get_current_page()
         if page_num != -1:

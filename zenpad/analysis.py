@@ -263,6 +263,45 @@ def generate_hex_dump(text):
             
             result.append(f"{offset}  {hex_bytes}{padding}  |{ascii_repr}|")
             
-        return "\n".join(result)
     except Exception as e:
         return f"Error generating hex dump: {e}"
+
+def calculate_hashes(text):
+    """
+    Calculates MD5, SHA1, SHA256, SHA512 hashes of the text.
+    Returns: dict {algo_name: hex_digest}
+    """
+    import hashlib
+    
+    if not text:
+        return {}
+        
+    data = text.encode("utf-8")
+    
+    results = {
+        "MD5": hashlib.md5(data).hexdigest(),
+        "SHA-1": hashlib.sha1(data).hexdigest(),
+        "SHA-256": hashlib.sha256(data).hexdigest(),
+        "SHA-512": hashlib.sha512(data).hexdigest()
+    }
+    return results
+
+def calculate_hashes(text):
+    """
+    Calculates MD5, SHA1, SHA256, SHA512 hashes of the text.
+    Returns: dict {algo_name: hex_digest}
+    """
+    import hashlib
+    
+    if not text:
+        return {}
+        
+    data = text.encode("utf-8")
+    
+    results = {
+        "MD5": hashlib.md5(data).hexdigest(),
+        "SHA-1": hashlib.sha1(data).hexdigest(),
+        "SHA-256": hashlib.sha256(data).hexdigest(),
+        "SHA-512": hashlib.sha512(data).hexdigest()
+    }
+    return results
