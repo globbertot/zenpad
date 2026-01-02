@@ -641,6 +641,33 @@ class ZenpadWindow(Gtk.ApplicationWindow):
         hash_item.add_accelerator("activate", self.accel_group, Gdk.KEY_H, Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK, Gtk.AccelFlags.VISIBLE)
         tools_menu.append(hash_item)
         
+        tools_menu.append(Gtk.SeparatorMenuItem())
+        
+        # Encodings Submenu
+        enc_menu = Gtk.Menu()
+        enc_item = Gtk.MenuItem(label="Encryption / Encoding")
+        enc_item.set_submenu(enc_menu)
+        
+        b64_enc = Gtk.MenuItem(label="Base64 Encode")
+        b64_enc.set_action_name("win.base64_enc")
+        enc_menu.append(b64_enc)
+        
+        b64_dec = Gtk.MenuItem(label="Base64 Decode")
+        b64_dec.set_action_name("win.base64_dec")
+        enc_menu.append(b64_dec)
+        
+        enc_menu.append(Gtk.SeparatorMenuItem())
+        
+        url_enc = Gtk.MenuItem(label="URL Encode")
+        url_enc.set_action_name("win.url_enc")
+        enc_menu.append(url_enc)
+        
+        url_dec = Gtk.MenuItem(label="URL Decode")
+        url_dec.set_action_name("win.url_dec")
+        enc_menu.append(url_dec)
+        
+        tools_menu.append(enc_item)
+        
         menubar.append(tools_item)
         
         # Help Menu (moved to end)
@@ -1373,7 +1400,12 @@ class ZenpadWindow(Gtk.ApplicationWindow):
             ("format_xml", self.on_format_xml),
             ("convert_json", self.on_convert_json),
             ("hex_view", self.on_hex_view),
-            ("calculate_hash", self.on_calculate_hash)
+            ("calculate_hash", self.on_calculate_hash),
+            # Encodings
+            ("base64_enc", lambda *args: self.on_transform_text("base64_enc")),
+            ("base64_dec", lambda *args: self.on_transform_text("base64_dec")),
+            ("url_enc", lambda *args: self.on_transform_text("url_enc")),
+            ("url_dec", lambda *args: self.on_transform_text("url_dec"))
         ])
 
         for name, callback in actions:
@@ -2381,6 +2413,11 @@ class ZenpadWindow(Gtk.ApplicationWindow):
         dialog.show_all()
         dialog.run()
         dialog.destroy()
+
+    def on_transform_text(self, mode):
+        """Helper to run text transformation"""
+        self._run_formatter(lambda text: analysis.transform_text(text, mode), mode)
+
     def on_toggle_comment(self, widget):
         page_num = self.notebook.get_current_page()
         if page_num != -1:

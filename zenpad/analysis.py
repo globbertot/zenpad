@@ -286,22 +286,36 @@ def calculate_hashes(text):
     }
     return results
 
-def calculate_hashes(text):
+def transform_text(text, mode):
     """
-    Calculates MD5, SHA1, SHA256, SHA512 hashes of the text.
-    Returns: dict {algo_name: hex_digest}
+    Transforms text based on the mode.
+    Modes: base64_enc, base64_dec, url_enc, url_dec
+    Returns: (success, result, error)
     """
-    import hashlib
+    import base64
+    import urllib.parse
     
     if not text:
-        return {}
+        return True, "", None
         
-    data = text.encode("utf-8")
-    
-    results = {
-        "MD5": hashlib.md5(data).hexdigest(),
-        "SHA-1": hashlib.sha1(data).hexdigest(),
-        "SHA-256": hashlib.sha256(data).hexdigest(),
-        "SHA-512": hashlib.sha512(data).hexdigest()
-    }
-    return results
+    try:
+        if mode == "base64_enc":
+            # Encode -> bytes -> base64 bytes -> string
+            encoded_bytes = base64.b64encode(text.encode("utf-8"))
+            return True, encoded_bytes.decode("utf-8"), None
+            
+        elif mode == "base64_dec":
+            # Decode -> base64 bytes -> bytes -> string
+            decoded_bytes = base64.b64decode(text)
+            return True, decoded_bytes.decode("utf-8"), None
+            
+        elif mode == "url_enc":
+            return True, urllib.parse.quote(text), None
+            
+        elif mode == "url_dec":
+            return True, urllib.parse.unquote(text), None
+            
+        return False, None, f"Unknown mode: {mode}"
+        
+    except Exception as e:
+        return False, None, str(e)
