@@ -47,7 +47,7 @@ class ZenpadApplication(Gtk.Application):
             return 0
             
         if parsed_args.version:
-            print("Zenpad v1.0.0")
+            print("Zenpad v1.2.0")
             return 0
             
         if parsed_args.list_encodings:
@@ -71,7 +71,26 @@ class ZenpadApplication(Gtk.Application):
         # Open Files
         if parsed_args.files:
             for filename in parsed_args.files:
-                self.window.open_file_from_path(filename, line=parsed_args.line, column=parsed_args.column, encoding=parsed_args.encoding)
+                if filename == "-":
+                    try:
+                        # Read from stdin stream provided by Gio
+                        stdin = command_line.get_stdin()
+                        if stdin:
+                            data_acc = b""
+                            while True:
+                                # Read in chunks
+                                chunk = stdin.read_bytes(8192, None)
+                                data = chunk.get_data()
+                                if not data:
+                                    break
+                                data_acc += data
+                                
+                            content = data_acc.decode("utf-8")
+                            self.window.add_tab(content, title="Stdin")
+                    except Exception as e:
+                        print(f"Error reading stdin: {e}")
+                else:
+                    self.window.open_file_from_path(filename, line=parsed_args.line, column=parsed_args.column, encoding=parsed_args.encoding)
 
         return 0
 
