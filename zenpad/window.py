@@ -1166,9 +1166,9 @@ class ZenpadWindow(Gtk.ApplicationWindow):
         # Try to find it
         language = manager.get_language(lang_id) if lang_id else None
         
-        n_pages = self.notebook.get_n_pages()
-        for i in range(n_pages):
-            editor = self.notebook.get_nth_page(i)
+        page_num = self.notebook.get_current_page()
+        if page_num != -1:
+            editor = self.notebook.get_nth_page(page_num)
             editor.buffer.set_language(language)
 
     def on_change_line_ending(self, widget, le):
@@ -1725,7 +1725,7 @@ class ZenpadWindow(Gtk.ApplicationWindow):
         
         # 1. Update Status Bar (Only if current tab)
         if page_num == self.notebook.get_current_page():
-            self.language_label.set_text(lang_name)
+            self.update_language_label(editor)
             
         # 2. Update Tab Icon
         if icon_widget:
@@ -1746,6 +1746,12 @@ class ZenpadWindow(Gtk.ApplicationWindow):
         # Update Window Title if this is the current tab
         if page_num == self.notebook.get_current_page():
             self.update_title(editor)
+
+    def update_language_label(self, editor):
+        """Dedicated method to update status bar language label"""
+        lang = editor.buffer.get_language()
+        lang_name = lang.get_name() if lang else "Plain Text"
+        self.language_label.set_text(lang_name)
 
     def update_match_count(self, editor):
         # Only update if it's the current tab
@@ -2059,6 +2065,7 @@ class ZenpadWindow(Gtk.ApplicationWindow):
     def on_tab_switched(self, notebook, page, page_num):
         editor = self.notebook.get_nth_page(page_num)
         self.update_statusbar(editor)
+        self.update_language_label(editor) # Force update usage
         self.update_match_count(editor) # Update search count for this tab
         
         # Disconnect previous

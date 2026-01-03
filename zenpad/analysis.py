@@ -105,31 +105,7 @@ def detect_language_by_content(text):
     if not text:
         return None
         
-    # Permanent Fix: Delegate to System (Gio) Content Sniffing first
-    import gi
-    try:
-        gi.require_version('GtkSource', '4')
-    except ValueError:
-        gi.require_version('GtkSource', '3.0')
-    from gi.repository import Gio, GtkSource
-
-    data = text.encode("utf-8")
-    content_type, uncertain = Gio.content_type_guess(None, data)
-    
-    # If Gio is confident and it's not just generic text
-    if not uncertain and content_type != "text/plain":
-        # Exception: Gio often sees C++ as C source (text/x-csrc). 
-        # We should accept it but allow refining to C++ via heuristics below if needed.
-        if content_type == "text/x-csrc":
-            pass # Fall through to heuristics to distinguish C vs C++
-        else:
-            manager = GtkSource.LanguageManager.get_default()
-            language = manager.guess_language(None, content_type)
-            if language:
-                return language.get_id()
-
-    # Fallback to Manual Heuristics
-    # 1. Shebang
+    # 1. Shebang (Highest Priority)
     first_line = text.splitlines()[0]
     if first_line.startswith("#!"):
         if "python" in first_line: return "python"
@@ -139,7 +115,7 @@ def detect_language_by_content(text):
         if "ruby" in first_line: return "ruby"
         if "php" in first_line: return "php"
 
-    # 2. Strong Structure Indicators (Java, C++, Go, Python Defs)
+    # 2. Strong Structure Indicators (Java, C++, Go, Python Defs, XML/HTML)
     sample = text[:1500]
     
     # Java (Strong)
@@ -168,10 +144,32 @@ def detect_language_by_content(text):
         if re.search(r'<[a-zA-Z0-9_-]+.*?>', text):
              if "</body>" in text or "</div>" in text or "<script" in text or "<br" in text or "<p>" in text: return "html"
              # If strictly XML like, return XML. But C includes might trip this if logical operators are used.
-             # We put this here but continue if unsure.
              pass
 
-    # 3. JSON
+    # 3. System (Gio) Content Sniffing
+    import gi
+    try:
+        gi.require_version('GtkSource', '4')
+    except ValueError:
+        gi.require_version('GtkSource', '3.0')
+    from gi.repository import Gio, GtkSource
+
+    data = text.encode("utf-8")
+    content_type, uncertain = Gio.content_type_guess(None, data)
+    
+    # If Gio is confident and it's not just generic text
+    if not uncertain and content_type != "text/plain":
+        # Exception: Gio often sees C++ or even Python/Java as partial C source.
+        # We allow falling through for C/C++ types to let our strict/loose heuristics confirm.
+        if content_type in ["text/x-csrc", "text/x-c++src", "text/x-chdr"]:
+            pass # Fall through to heuristics
+        else:
+            manager = GtkSource.LanguageManager.get_default()
+            language = manager.guess_language(None, content_type)
+            if language:
+                return language.get_id()
+
+    # 4. JSON
     if (text.startswith("{") and text.endswith("}")) or \
        (text.startswith("[") and text.endswith("]")):
         try:
@@ -184,7 +182,7 @@ def detect_language_by_content(text):
              if text.startswith("{") and re.search(r'"[^"]*"\s*:', text): return "json"
              elif text.startswith("["): return "json"
 
-    # 4. Looser Keyword Heuristics (Careful!)
+    # 5. Looser Keyword Heuristics (Fallback)
     
     # C/C++ bodies
     if "int main(" in sample and "{" in sample:
