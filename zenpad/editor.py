@@ -157,6 +157,30 @@ class EditorTab(Gtk.ScrolledWindow):
         keyval = event.keyval
         if keyval in [Gdk.KEY_Return, Gdk.KEY_KP_Enter]:
             if (event.state & Gdk.ModifierType.SHIFT_MASK) or (event.state & Gdk.ModifierType.CONTROL_MASK):
+                if event.state & Gdk.ModifierType.SHIFT_MASK and keyval == Gdk.KEY_Return:
+                    pass # Allow Shift+Enter
+                elif keyval not in [Gdk.KEY_quotedbl, Gdk.KEY_apostrophe]:
+                     return False # Allow other modified keys
+
+        # Auto-Close Quotes
+        if keyval in [Gdk.KEY_quotedbl, Gdk.KEY_apostrophe]:
+             # Only strictly auto-close if no selection? For now simple implementation.
+             buff = self.buffer
+             quote_char = '"' if keyval == Gdk.KEY_quotedbl else "'"
+             
+             # Insert the pair
+             buff.insert_at_cursor(quote_char + quote_char)
+             
+             # Move cursor back by 1
+             insert = buff.get_insert()
+             iter_cur = buff.get_iter_at_mark(insert)
+             iter_cur.backward_char()
+             buff.place_cursor(iter_cur)
+             
+             return True # Stop default handler (which would insert single char)
+
+        if keyval in [Gdk.KEY_Return, Gdk.KEY_KP_Enter]:
+            if (event.state & Gdk.ModifierType.SHIFT_MASK) or (event.state & Gdk.ModifierType.CONTROL_MASK):
                 return False
                 
             buff = self.buffer
